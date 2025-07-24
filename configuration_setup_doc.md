@@ -7,34 +7,30 @@ This document provides a complete, step-by-step guide for setting up the develop
 
 This phase prepares your Windows machine with the necessary Linux environment. All commands should be run in **PowerShell as an Administrator**.
 
-1.  **Install Core WSL Components:** This prepares your system for WSL.
+1.  **Install Core WSL Components:**
     ```powershell
     wsl --install --no-distribution
     ```
     **You must reboot your computer** after this step is complete.
 
-2.  **Install Ubuntu via Command Line:** This is the most reliable method.
+2.  **Install Ubuntu via Command Line:**
     ```powershell
     wsl --install Ubuntu-24.04
     ```
-3.  **Create Your User Account:** After the command finishes, a new terminal will open. Follow the prompts to create your Linux username and password. **Note:** You will not see characters as you type your password. This is normal.
+3.  **Create Your User Account:** After the command finishes, a new terminal will open. Follow the prompts to create your Linux username and password.
 
 ---
 ## 2. Moving WSL to Drive D: (Optional)
 
 To save space on your C: drive, follow these steps in **PowerShell (Admin)**.
 
-1.  **Exit Ubuntu:** If you are inside the Ubuntu terminal, type `exit` and press Enter.
-2.  **Verify Installation:** Confirm WSL sees your new installation.
-    ```powershell
-    wsl --list --all
-    ```
+1.  **Exit Ubuntu:** If you are inside the Ubuntu terminal, type `exit`.
+2.  **Verify Installation:** Confirm WSL sees your new installation with `wsl --list --all`.
 3.  **Create Folders on Drive D:**
     ```powershell
-    mkdir D:\WSL
-    mkdir D:\WSL_Backup
+    mkdir D:\WSL; mkdir D:\WSL_Backup
     ```
-4.  **Move the Installation:** Run these commands one by one to move the system.
+4.  **Move the Installation:**
     ```powershell
     wsl --shutdown
     wsl --export Ubuntu-24.04 D:\WSL_Backup\ubuntu.tar
@@ -50,68 +46,135 @@ To save space on your C: drive, follow these steps in **PowerShell (Admin)**.
 ---
 ## 3. Installing Developer Tools
 
-1.  **VS Code:** Download from the [official website](https://code.visualstudio.com/) and install these extensions: `WSL`, `Python`, `Volar`, `Docker`, `Prettier - Code formatter`.
-2.  **Docker Desktop:** Download from the [official website](https://www.docker.com/products/docker-desktop/) and ensure it's configured to use the WSL 2 backend in its settings.
-3.  **Git:** Open your Ubuntu terminal (by typing `wsl` in PowerShell) and run `sudo apt update && sudo apt install git`.
+1.  **Docker Desktop:** Download from the [official website](https://www.docker.com/products/docker-desktop/). After installing, go to **Settings > Resources > WSL Integration** and ensure the toggle for **`Ubuntu-24.04` is ON**.
+2.  **VS Code:** Download from the [official website](https://code.visualstudio.com/) and install these extensions: `WSL`, `Python`, `Volar`, `Docker`.
+3.  **Git:** Open your Ubuntu terminal and run `sudo apt update && sudo apt install git`.
 
 ---
-## 4. Project Setup
+## 4. Project & Docker Configuration
 
-All commands from this point forward must be run from **inside your Ubuntu terminal**.
+All commands from this point forward must be run from **inside your Ubuntu terminal**, within your project folder.
 
-1.  **Clone the Repository:**
+1.  **Clone & Navigate:**
     ```bash
-    git clone [https://github.com/gestaacinc/schoolmanagementv0.1.git](https://github.com/gestaacinc/schoolmanagementv0.1.git) school-management-system
-    ```
-2.  **Navigate into the Project Directory:**
-    ```bash
+    git clone git@github.com:gestaacinc/schoolmanagementv0.1.git school-management-system
     cd school-management-system
     ```
-3.  **Create the Environment File Template:** This file might not exist in the repo, so create it.
-    ```bash
-    cat << EOF > .env.example
+2.  **Create `.env` file:** Open a blank file named `.env.example` with `nano .env.example`, paste the content below, then save and exit (`Ctrl+X`, `Y`, `Enter`).
+    ```ini
     # Django Settings
     SECRET_KEY=change-me-in-production-later
     DEBUG=True
-
     # Database Settings (for Docker)
     POSTGRES_DB=school_db
     POSTGRES_USER=school_user
     POSTGRES_PASSWORD=strongpassword
     DATABASE_HOST=db
     DATABASE_PORT=5432
-    EOF
     ```
-4.  **Create Your Local Environment File:**
+    Then copy it: `cp .env.example .env`
+
+3.  **Create `docker-compose.yml`:** Open the file with `nano docker-compose.yml`, paste the content below, then save and exit.
+    ```yaml
+    services:
+      backend:
+        build: ./backend
+        command: python manage.py runserver 0.0.0.0:8000
+        environment:
+          - PYTHONPATH=/app
+        volumes:
+          - ./backend:/app
+        ports:
+          - "8000:8000"
+        env_file:
+          - ./.env
+        depends_on:
+          - db
+      db:
+        image: postgres:16-alpine
+        volumes:
+          - postgres_data:/var/lib/postgresql/data/
+        environment:
+          - POSTGRES_DB=${POSTGRES_DB}
+          - POSTGRES_USER=${POSTGRES_USER}
+          - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+        ports:
+          - "5432:5432"
+    volumes:
+      postgres_data:
+    ```
+4.  **Create Backend Files:**
     ```bash
-    cp .env.example .env
+    mkdir backend
+    nano backend/Dockerfile
+    ```
+    Paste the following into the Dockerfile, then save and exit:
+    ```dockerfile
+    FROM python:3.11-slim
+    ENV PYTHONDONTWRITEBYTECODE 1
+    ENV PYTHONUNBUFFERED 1
+    WORKDIR /app
+    COPY requirements.txt /app/
+    RUN pip install --no-cache-dir -r requirements.txt
+    COPY . /app/
+    ```
+5.  **Create Python Dependencies File:**
+    ```bash
+    echo "Django~=5.0" > backend/requirements.txt
+    echo "psycopg2-binary" >> backend/requirements.txt
     ```
 
 ---
-## 5. Running the Application
+## 5. Building and Initializing the Application
 
-1.  **Start Docker Services:** This command builds and starts the database and backend services.
+1.  **Build Docker Image:**
     ```bash
-    docker-compose up -d --build
+    docker compose build
     ```
-2.  **Run Database Migrations:** This sets up the project's tables in the database.
+2.  **Create the Django Project Files:**
     ```bash
-    docker-compose exec backend python manage.py migrate
+    docker compose run --rm backend django-admin startproject school_project .
     ```
-3.  **Create an Admin Superuser:** This creates your account for the admin panel. Follow the prompts.
+3.  **Fix File Permissions:**
     ```bash
-    docker-compose exec backend python manage.py createsuperuser
+    sudo chown -R $USER:$USER backend
     ```
-4.  **Run Development Servers:** You need two terminals for this.
-    * **Terminal 1 (Backend):**
-        ```bash
-        docker-compose exec backend python manage.py runserver 0.0.0.0:8000
+4.  **Configure Django `settings.py`:**
+    * Open the settings file: `nano backend/school_project/settings.py`
+    * Add `import os` to the very top of the file.
+    * Find the `DATABASES` section and replace the entire block with this:
+        ```python
+        DATABASES = {
+            'default': {
+                'ENGINE': 'django.db.backends.postgresql',
+                'NAME': os.environ.get('POSTGRES_DB'),
+                'USER': os.environ.get('POSTGRES_USER'),
+                'PASSWORD': os.environ.get('POSTGRES_PASSWORD'),
+                'HOST': os.environ.get('DATABASE_HOST'),
+                'PORT': os.environ.get('DATABASE_PORT'),
+            }
+        }
         ```
-    * **Terminal 2 (Frontend):**
-        ```bash
-        docker-compose exec frontend npm install
-        docker-compose exec frontend npm run dev
-        ```
-5.  **Access the Application:**
-    * **Frontend:** [http://localhost:5173](http://localhost:5173)
+    * Save and exit (`Ctrl+X`, `Y`, `Enter`).
+
+---
+## 6. Final Setup and Execution
+
+1.  **Start Services:**
+    ```bash
+    docker compose up -d
+    ```
+2.  **Verify Containers are Running:** Check that `backend` and `db` are both "running".
+    ```bash
+    docker compose ps
+    ```
+3.  **Run Database Migrations:**
+    ```bash
+    docker compose exec backend python manage.py migrate
+    ```
+4.  **Create Admin Superuser:** Follow the prompts.
+    ```bash
+    docker compose exec backend python manage.py createsuperuser
+    ```
+5.  **Access the Application:** Your backend is now running.
     * **Admin Panel:** [http://localhost:8000/admin/](http://localhost:8000/admin/)
